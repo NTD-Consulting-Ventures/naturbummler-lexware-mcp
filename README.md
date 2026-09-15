@@ -1,3 +1,19 @@
+# Naturbummler · Lexware MCP
+
+Naturbummler-gepflegter Fork für Railway mit Microsoft Entra und ausschließlich
+lesendem Pilotbetrieb. Kommentare und Betriebsdokumentation der Anpassungen sind deutsch.
+
+**Status: vorbereitet und lokal getestet; noch nicht deployt und noch nicht in Claude.ai live abgenommen.**
+
+- [Deployment-Konfiguration und offene Live-Prüfungen](docs/NATURBUMMLER-DEPLOYMENT.md)
+- [Plan und Anforderungen](SPEC.md)
+- [Variablenvorlage ohne Geheimnisse](.env.naturbummler.example)
+
+Die Docker-Konfiguration erzwingt das Naturbummler-Profil. Die nachfolgende
+Upstream-Dokumentation beschreibt auch Funktionen, die im Pilot gesperrt sind.
+
+---
+
 # Lexware Office MCP Server
 
 [![CI](https://github.com/marselsel/Lexware-MCP-Server/actions/workflows/ci.yml/badge.svg)](https://github.com/marselsel/Lexware-MCP-Server/actions/workflows/ci.yml)

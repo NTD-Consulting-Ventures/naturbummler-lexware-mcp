@@ -37,11 +37,14 @@ const client = new LexwareClient({
   baseUrl: config.lexwareApiBaseUrl,
   apiKey: config.lexwareApiKey,
   debug: config.debugLogging,
+  readOnly: !config.capabilities.drafts,
 });
 
 const server = new McpServer(
   {
-    name: "lexware-office",
+    name: "naturbummler-lexware",
+    title: "Naturbummler · Lexware",
+    icons: [{ src: `${new URL(config.publicBaseUrl).origin}/assets/naturbummler-logo.webp`, mimeType: "image/webp" }],
     version: "0.1.13",
   },
   { capabilities: {} },
@@ -57,6 +60,18 @@ const bodyParsingConfigured = deferBodyParsingFor(server.express, (p) => isMcpPa
 
 // Unauthenticated health check. Use `/status`, not `/healthz`: Google Front End
 // intercepts `/healthz` on Cloud Run (it never reaches the container).
+server.express.get("/assets/naturbummler-logo.webp", (_req, res) => {
+  res.sendFile("naturbummler-logo.webp", { root: "assets" });
+});
+server.express.get("/", (_req, res) => {
+  res.type("html").send('<html lang="de"><meta charset="utf-8"><title>Naturbummler · Lexware</title><main><img src="/assets/naturbummler-logo.webp" alt="Naturbummler" width="240"><h1>Lexware für Naturbummler</h1><p>Mit Microsoft anmelden und freigegebene Lexware-Daten in Claude lesen.</p></main></html>');
+});
+// Lebenszeichen und Konfigurationsbereitschaft sind bewusst getrennt.
+server.express.get("/ready", (_req, res) => {
+  res.status(config.lexwareApiKey ? 200 : 503).json({
+    status: config.lexwareApiKey ? "configured" : "configuration_required",
+  });
+});
 server.express.get("/status", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
@@ -139,7 +154,7 @@ if (!bodyParsingConfigured) {
       "the full limit (routes.ts's Buffer.isBuffer guard prevents a silent empty upload for the JSON case).",
   );
 }
-if (config.auth.mode === "oauth" && config.auth.allowedEmailDomains.length === 0) {
+if (config.auth.mode === "oauth" && config.auth.allowedEmailDomains.length === 0 && !config.auth.entra) {
   console.error(
     "[lexware-mcp] WARNING: OAuth mode with no OAUTH_ALLOWED_EMAIL_DOMAINS — ANY user who can " +
       "authenticate with your issuer can reach this server. Set OAUTH_ALLOWED_EMAIL_DOMAINS to restrict access.",

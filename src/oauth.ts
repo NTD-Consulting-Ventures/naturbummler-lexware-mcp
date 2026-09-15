@@ -1,3 +1,4 @@
+import type { EntraPolicy } from "./entra.js";
 import { InsufficientScopeError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
@@ -9,6 +10,7 @@ const MAX_EMAIL_CACHE_ENTRIES = 5000;
 
 /** The OAuth slice of {@link import("./config.js").AuthConfig} (mode === "oauth"). */
 export interface OAuthSettings {
+  entra?: EntraPolicy;
   issuer: string;
   jwksUrl: string;
   resource: string;
@@ -71,7 +73,9 @@ export function buildOAuthMetadata(oauth: OAuthSettings): OAuthMetadata {
     // other: an operator who sets OAUTH_SCOPES_SUPPORTED for a non-WorkOS IdP would
     // otherwise still see `openid email profile` advertised here. Falls back to the
     // historic default when unset, leaving existing deployments unchanged.
-    scopes_supported: advertisedScopes(oauth) ?? DEFAULT_ADVERTISED_SCOPES,
+    scopes_supported: oauth.entra
+      ? [...(advertisedScopes(oauth) ?? []), "openid", "profile", "offline_access"]
+      : advertisedScopes(oauth) ?? DEFAULT_ADVERTISED_SCOPES,
   };
 }
 
@@ -167,7 +171,8 @@ export function createAccessTokenVerifier(oauth: OAuthSettings, deps: VerifierDe
     try {
       ({ payload } = await jose.jwtVerify(token, jwks, {
         issuer: oauth.issuer,
-        ...(oauth.verifyAudience ? { audience: audiences } : {}),
+        ...(oauth.entra || oauth.verifyAudience ? { audience: oauth.entra ? [oauth.entra.audience] : audiences } : {}),
+        ...(oauth.entra ? { algorithms: ["RS256"], requiredClaims: ["exp", "iat", "sub", "tid", "oid", "scp", "azp"] } : {}),
       }));
     } catch {
       throw new InvalidTokenError("Invalid or expired access token");
@@ -175,6 +180,29 @@ export function createAccessTokenVerifier(oauth: OAuthSettings, deps: VerifierDe
 
     const sub = typeof payload.sub === "string" ? payload.sub : "";
     if (!sub) throw new InvalidTokenError("Token is missing the sub claim");
+
+    // Entra verwendet scp; ein scope-Claim oder ein ID-Token genügt nicht.
+    const scopes = typeof (oauth.entra ? payload.scp : payload.scope) === "string"
+      ? String(oauth.entra ? payload.scp : payload.scope).split(/\s+/).filter(Boolean) : [];
+    if (oauth.entra) {
+      const policy = oauth.entra;
+      if (payload.tid !== policy.tenantId || payload.ver !== "2.0" ||
+          typeof payload.oid !== "string" || !payload.oid ||
+          typeof payload.azp !== "string" || !payload.azp || payload.idtyp === "app") {
+        throw new InvalidTokenError("Kein gültiges delegiertes Entra-Access-Token");
+      }
+      if (!policy.requiredScopes.every(scope => scopes.includes(scope))) {
+        throw new InsufficientScopeError("Erforderlicher Entra-Scope fehlt");
+      }
+      const roles = Array.isArray(payload.roles) ? payload.roles : [];
+      const groups = Array.isArray(payload.groups) ? payload.groups : [];
+      // Gruppenüberlauf wird nicht über fremde URLs aufgelöst; ohne Treffer bleibt der Zugriff gesperrt.
+      if (policy.accessPolicy === "assigned" &&
+          !policy.allowedRoles.some(role => roles.includes(role)) &&
+          !policy.allowedGroups.some(group => groups.includes(group))) {
+        throw new InsufficientScopeError("Keine freigegebene Gruppe oder App-Rolle");
+      }
+    }
 
     // Trust the email for authorization only when the IdP marked it verified; an
     // unverified token email falls through to the (also verification-checked) userinfo lookup.
@@ -217,7 +245,7 @@ export function createAccessTokenVerifier(oauth: OAuthSettings, deps: VerifierDe
     return {
       token,
       clientId: (payload.client_id ?? payload.azp ?? "") as string,
-      scopes: typeof payload.scope === "string" ? payload.scope.split(" ") : [],
+      scopes,
       expiresAt: typeof payload.exp === "number" ? payload.exp : undefined,
       extra: { sub, ...(email ? { email } : {}) },
     };

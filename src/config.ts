@@ -1,3 +1,4 @@
+import { entraEnvironment, type EntraPolicy } from "./entra.js";
 /**
  * Configuration for the Lexware MCP server.
  *
@@ -46,6 +47,7 @@ export interface Capabilities {
 export type AuthConfig =
   | {
       mode: "oauth";
+      entra?: EntraPolicy;
       /** Authorization server issuer (e.g. the WorkOS AuthKit domain URL). */
       issuer: string;
       /** JWKS endpoint used to verify access-token signatures. */
@@ -368,14 +370,19 @@ function resolveAuth(env: NodeJS.ProcessEnv): AuthConfig {
  * @param env - environment source (defaults to `process.env`); injectable for tests.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const lexwareApiKey = env.LEXWARE_API_KEY?.trim();
-  if (!lexwareApiKey) {
+  const prepared = entraEnvironment(env);
+  env = prepared.env;
+  const lexwareApiKey = env.LEXWARE_API_KEY?.trim() ?? "";
+  // Der Entra-geschützte Dienst darf vor der späteren Secret-Eingabe starten.
+  // Ohne Schlüssel sperrt der HTTP-Client jeden Lexware-Aufruf.
+  if (!lexwareApiKey && !prepared.policy) {
     throw new ConfigError(
       "LEXWARE_API_KEY is required. Create one at https://app.lexware.de/addons/public-api",
     );
   }
 
   const auth = resolveAuth(env);
+  if (auth.mode === "oauth") auth.entra = prepared.policy;
   const port = parsePort(env.PORT);
 
   const readOnly = parseBool(env.LEXWARE_READ_ONLY, false);

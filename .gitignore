@@ -12,3 +12,6 @@ dist/
 *.tsbuildinfo
 .skybridge/
 .agents/
+# Geheimnisfreie Naturbummler-Vorlage und lokale Deployment-Prüfdaten.
+!.env.naturbummler.example
+deployment.local.json
