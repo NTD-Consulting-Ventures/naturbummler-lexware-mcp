@@ -4,6 +4,8 @@ import { RateLimiter } from "./rate-limiter.js";
 export interface LexwareClientOptions {
   baseUrl: string;
   apiKey: string;
+  /** Zusätzliche Sperre direkt vor jedem ausgehenden API-Aufruf. */
+  readOnly?: boolean;
   /** When true, log method/path/status (never bodies or secrets). */
   debug?: boolean;
   /** Injectable for tests. Defaults to global `fetch`. */
@@ -38,6 +40,7 @@ const MAX_RETRY_WAIT_MS = 30_000;
 
 /** Thin, rate-limited, retry-aware client for the Lexware Office REST API. */
 export class LexwareClient {
+  private readonly readOnly: boolean;
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly debug: boolean;
@@ -50,6 +53,7 @@ export class LexwareClient {
   private readonly limiter: RateLimiter;
 
   constructor(opts: LexwareClientOptions) {
+    this.readOnly = opts.readOnly ?? false;
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.apiKey = opts.apiKey;
     this.debug = opts.debug ?? false;
@@ -167,6 +171,9 @@ export class LexwareClient {
       idempotent: boolean;
     },
   ): Promise<Response> {
+    if (this.readOnly && method !== "GET") {
+      throw new Error("Schreibzugriff im Lesemodus gesperrt");
+    }
     const url = this.buildUrl(path, opts.query);
 
     let attempt = 0;
@@ -178,6 +185,7 @@ export class LexwareClient {
       try {
         res = await this.fetchFn(url, {
           method,
+          redirect: this.readOnly ? "error" : "follow",
           headers: opts.headers,
           body: opts.body,
           signal: AbortSignal.timeout(this.requestTimeoutMs),

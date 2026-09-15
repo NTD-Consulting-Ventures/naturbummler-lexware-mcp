@@ -39,11 +39,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 # Default listen port. Cloud Run overrides PORT at runtime; the server reads it.
 ENV PORT=8080
+# Im Railway-Container ist das sichere Naturbummler-Profil verpflichtend.
+ENV NATURBUMMLER_PROFILE=true
 
 USER node
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/assets ./assets
 COPY --from=build --chown=node:node /app/package.json ./package.json
 
 EXPOSE 8080
