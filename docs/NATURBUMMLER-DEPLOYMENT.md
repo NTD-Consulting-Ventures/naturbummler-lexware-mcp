@@ -2,7 +2,7 @@
 
 ## Status
 
-**Noch nicht deployt.** Der leere Dienst und die Domain sind angelegt; Variablenreferenzen, Docker-Build, Start und Healthcheck sind hinterlegt. Die Code-Quelle fehlt absichtlich noch. Dieser Stand ist eine getestete Vorbereitung, keine Live-Abnahme.
+**Am 16.09.2026 erfolgreich deployt und öffentlich geprüft.** Quelle ist der Naturbummler-Fork auf `main`, Region EU West (Amsterdam). Die vollständige Claude.ai-/Entra-/Lexware-Abnahme steht noch aus. Der Lexware-Schlüssel wird später hinterlegt.
 
 - Fork: `NTD-Consulting-Ventures/naturbummler-lexware-mcp`.
 - Ausgangspunkt: `marselsel/Lexware-MCP-Server`, Commit `5c0247053c36aaaac0feaebdbda2dbc7e09f4a59`.
@@ -17,23 +17,23 @@
 - Auftraggeber-Präzisierung: Zugriff wie Cargoboard ohne zusätzliche Gruppen-/Rollenfilter (`ENTRA_ACCESS_POLICY=tenant`).
 - Lexware-Schlüssel wird vom Auftraggeber später direkt in Railway hinterlegt.
 
-## Vorgesehene Railway-Konfiguration
+## Railway-Konfiguration
 
 | Einstellung | Wert / noch erforderliche Feststellung |
 |---|---|
 | Projekt | `naturbummler-cargo-mcp`; bestätigte ID in der lokalen Deployment-Vorlage |
 | Umgebung | `production`; bestätigte ID in der lokalen Deployment-Vorlage |
 | Dienstname | `naturbummler-lexware-mcp` |
-| Quelle | Naturbummler-Fork, freigegebener Commit; kein Upstream-Autodeploy |
+| Quelle | Naturbummler-Fork, Branch `main`; kein Upstream-Autodeploy |
 | Build | Dockerfile, Node 26, gesperrter npm-Lockfile, nicht privilegierter Benutzer |
 | Start | `node dist/server.js` |
 | Soll-Konfiguration | `.railway/railway.ts`; benannter Teil nur für Lexware, noch nicht angewendet |
 | Port | Von Railway gesetztes `PORT`; Standard 8080 |
 | Healthcheck | `GET /status`, Timeout 60 Sekunden |
-| Region | Soll: `europe-west4-drams3a`; aktuell voreingestellt: `sfo`, Wechsel noch offen |
+| Region | `europe-west4-drams3a` (EU West, Amsterdam) |
 | Replikate | 1 |
 | Neustart | Bei Fehler, höchstens 3 Versuche |
-| MCP-Adresse | `https://naturbummler-lexware-mcp-production.up.railway.app/mcp` (noch ohne Deployment) |
+| MCP-Adresse | `https://naturbummler-lexware-mcp-production.up.railway.app/mcp` |
 | Geheimnisse | `LEXWARE_API_KEY` ausschließlich als Railway-Variable |
 | Zusätzlicher Speicher | Für die vorbereitete direkte Entra-Verifikation nicht erforderlich |
 
@@ -122,7 +122,7 @@ npm test
 npm audit
 ```
 
-Ergebnis: **374 Tests in 21 Dateien erfolgreich**, TypeScript-Build erfolgreich,
+Ergebnis: **376 Tests in 21 Dateien erfolgreich**, TypeScript-Build erfolgreich,
 **0 bekannte npm-Audit-Schwachstellen** nach kompatiblen Lockfile-Aktualisierungen.
 
 Der neue HTTP-Integrationstest startet die wirkliche Server-Anwendung, prüft
@@ -140,9 +140,9 @@ Der CI-Workflow enthält einen Docker-Build sowie Build, Tests und npm-Audit.
 
 ## Abnahme nach Vervollständigung der Konfiguration
 
-Vor Deployment die tatsächlichen Projekt-/Umgebungs-IDs, Domain, Entra-IDs,
-Freigabelisten, Client-Konfiguration und den getesteten Commit vorlegen.
-Erst nach der angeforderten Deployment-Freigabe die Quelle am bereits angelegten Dienst verbinden und starten.
+Der Auftraggeber hat das Deployment ausdrücklich auch ohne Lexware-Schlüssel freigegeben.
+`/status` ist der Railway-Healthcheck; `/ready` meldet bis zur Hinterlegung des Schlüssels HTTP 503.
+Später `LEXWARE_API_KEY` ausschließlich in Railway setzen und die Variablenänderung deployen.
 
 Für einen echten Claude.ai-Test schon vor dem Railway-Deployment wird eine separat
 freigegebene erreichbare HTTPS-Testinstanz mit passender Entra-Konfiguration benötigt.
@@ -180,6 +180,21 @@ Neue Railway-Dienste akzeptieren kein `railway.json`/`railway.toml` mehr.
 Die unterstützte Soll-Konfiguration liegt deshalb unter `.railway/railway.ts`.
 Sie ist typgeprüft; ein Live-IaC-Plan benötigt noch eine angemeldete CLI.
 `partial` begrenzt die Verwaltung auf diesen Dienst im separaten Repository.
-Ein Apply verbindet die Quelle und ist deshalb Teil des noch nicht freigegebenen Deployments.
+Die Live-Konfiguration wurde über Railway-Connector und Dashboard angewendet; die IaC-Datei dient als versionierte Soll-Konfiguration.
 
 [Railway: Infrastructure as Code](https://docs.railway.com/infrastructure-as-code)
+
+## Deployment-Protokoll vom 16.09.2026
+
+- Railway: `SUCCESS`, Deployment `d0139c4f-8f7d-4582-88a1-7b3cbb6691c7`.
+- Commit auf `main`: `87f20073454053429ca6abdf55410d80097e4442`.
+- EU West (Amsterdam), eine Replik; keine offenen Railway-Änderungen.
+- Öffentlich geprüft: Startseite und NB-Logo HTTP 200, `/status` HTTP 200,
+  `/mcp` ohne Anmeldung HTTP 401 samt Discovery-Verweis.
+- Discovery unter `/.well-known/oauth-protected-resource/mcp` HTTP 200;
+  API-Scope und mandantenspezifischer Entra-Issuer werden ausgeliefert.
+- `/ready` meldet erwartungsgemäß HTTP 503, weil `LEXWARE_API_KEY` noch fehlt.
+- Bestehende drei Dienste unverändert mit denselben erfolgreichen Deployments.
+- CI: 376 Tests, TypeScript und Docker-Build erfolgreich.
+- Noch offen: konkrete Claude-OAuth-Clientregistrierung, echter Microsoft-Login
+  und Lexware-Leseaufruf nach Hinterlegung des Schlüssels.
