@@ -174,6 +174,9 @@ export class LexwareClient {
     if (this.readOnly && method !== "GET") {
       throw new Error("Schreibzugriff im Lesemodus gesperrt");
     }
+    if (!this.apiKey) {
+      throw new LexwareApiError(503, "LEXWARE_API_KEY fehlt. Bitte den Schlüssel in Railway hinterlegen und neu deployen.");
+    }
     const url = this.buildUrl(path, opts.query);
 
     let attempt = 0;

@@ -11,7 +11,7 @@ export default defineRailway(ctx => {
   return project('naturbummler-cargo-mcp', {
     resources: [service('naturbummler-lexware-mcp', {
       source: github('NTD-Consulting-Ventures/naturbummler-lexware-mcp', {
-        branch: 'codex/naturbummler-entra-railway',
+        branch: 'main',
       }),
       build: { builder: 'DOCKERFILE', dockerfilePath: 'Dockerfile' },
       start: 'node dist/server.js',

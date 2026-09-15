@@ -66,6 +66,12 @@ server.express.get("/assets/naturbummler-logo.webp", (_req, res) => {
 server.express.get("/", (_req, res) => {
   res.type("html").send('<html lang="de"><meta charset="utf-8"><title>Naturbummler · Lexware</title><main><img src="/assets/naturbummler-logo.webp" alt="Naturbummler" width="240"><h1>Lexware für Naturbummler</h1><p>Mit Microsoft anmelden und freigegebene Lexware-Daten in Claude lesen.</p></main></html>');
 });
+// Lebenszeichen und Konfigurationsbereitschaft sind bewusst getrennt.
+server.express.get("/ready", (_req, res) => {
+  res.status(config.lexwareApiKey ? 200 : 503).json({
+    status: config.lexwareApiKey ? "configured" : "configuration_required",
+  });
+});
 server.express.get("/status", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });

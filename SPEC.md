@@ -32,3 +32,8 @@ und API-Audience sind vorgesehen; dienstfremde Proxy-Token werden nicht akzeptie
 Railway-Zugang wiederhergestellt. Projekt naturbummler-cargo-mcp / production
 mit cargo-mcp, google-ads-mcp und Redis in europe-west4-drams3a bestätigt.
 Variablenwerte sind vom Connector ausgeblendet; Entra-Freigaben und Live-Login bleiben offen.
+
+## Deployment-Freigabe
+Der Auftraggeber hat das Deployment ausdrücklich freigegeben und hinterlegt den
+Lexware-Schlüssel später. Bis dahin startet der Entra-geschützte Dienst, sperrt
+Lexware-Aufrufe vor dem Netzwerk und meldet /ready mit 503. /status bleibt das Lebenszeichen.

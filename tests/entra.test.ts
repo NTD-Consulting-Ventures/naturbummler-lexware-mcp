@@ -33,6 +33,9 @@ beforeAll(async () => {
 });
 
 describe('Naturbummler-Konfiguration', () => {
+  it('startet mit vollständigem Entra-Schutz auch vor der späteren Secret-Eingabe', () => {
+    expect(loadConfig({ ...env, LEXWARE_API_KEY: '' }).lexwareApiKey).toBe('');
+  });
   it('erzwingt Lesen und annonciert den vollqualifizierten API-Scope ohne falsches DCR', () => {
     expect(config.capabilities).toEqual({ read: true, drafts: false, finalize: false, urlUpload: false });
     expect(oauth.scopesSupported).toEqual([`api://${audience}/mcp.access`]);
@@ -103,6 +106,12 @@ describe('Entra-Access-Token', () => {
 });
 
 describe('Schreibsperre vor dem Netzwerk', () => {
+  it('sendet ohne Lexware-Schlüssel keinen Netzwerkaufruf', async () => {
+    const fetchFn = vi.fn();
+    const client = new LexwareClient({ apiKey: '', baseUrl: 'https://api.lexware.io', readOnly: true, fetchFn });
+    await expect(client.get('/v1/profile')).rejects.toThrow('LEXWARE_API_KEY fehlt');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
   it.each(['POST', 'PUT', 'PATCH', 'DELETE'])('sperrt %s', async method => {
     const fetchFn = vi.fn();
     const client = new LexwareClient({ apiKey: 'test', baseUrl: 'https://api.lexware.io', readOnly: true, fetchFn });

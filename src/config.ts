@@ -372,8 +372,10 @@ function resolveAuth(env: NodeJS.ProcessEnv): AuthConfig {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const prepared = entraEnvironment(env);
   env = prepared.env;
-  const lexwareApiKey = env.LEXWARE_API_KEY?.trim();
-  if (!lexwareApiKey) {
+  const lexwareApiKey = env.LEXWARE_API_KEY?.trim() ?? "";
+  // Der Entra-geschützte Dienst darf vor der späteren Secret-Eingabe starten.
+  // Ohne Schlüssel sperrt der HTTP-Client jeden Lexware-Aufruf.
+  if (!lexwareApiKey && !prepared.policy) {
     throw new ConfigError(
       "LEXWARE_API_KEY is required. Create one at https://app.lexware.de/addons/public-api",
     );
