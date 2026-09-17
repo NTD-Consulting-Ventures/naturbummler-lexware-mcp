@@ -3,7 +3,9 @@
 Naturbummler-gepflegter Fork für Railway mit Microsoft Entra und ausschließlich
 lesendem Pilotbetrieb. Kommentare und Betriebsdokumentation der Anpassungen sind deutsch.
 
-**Status: vorbereitet und lokal getestet; noch nicht deployt und noch nicht in Claude.ai live abgenommen.**
+**Naturbummler-Status:** In Railway deployt und auf reinen Lesezugriff begrenzt. Die
+Claude.ai-Live-Abnahme erfolgt nach Hinterlegung des Lexware-Schlüssels und der zusätzlichen
+Entra-Redirect-URI; siehe `docs/NATURBUMMLER-DEPLOYMENT.md`.
 
 - [Deployment-Konfiguration und offene Live-Prüfungen](docs/NATURBUMMLER-DEPLOYMENT.md)
 - [Plan und Anforderungen](SPEC.md)

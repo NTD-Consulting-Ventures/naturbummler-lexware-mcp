@@ -42,12 +42,22 @@ ENV PORT=8080
 # Im Railway-Container ist das sichere Naturbummler-Profil verpflichtend.
 ENV NATURBUMMLER_PROFILE=true
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/auth-venv
+
+COPY requirements-auth.txt /tmp/requirements-auth.txt
+RUN /opt/auth-venv/bin/pip install --no-cache-dir -r /tmp/requirements-auth.txt \
+    && rm /tmp/requirements-auth.txt
+
 USER node
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/assets ./assets
 COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY --chown=node:node auth_gateway.py ./auth_gateway.py
 
 EXPOSE 8080
 
@@ -57,4 +67,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Run the built server directly rather than via `npm start` / `skybridge start`.
 # Each wrapper adds a process layer that can swallow SIGTERM, which makes
 # graceful shutdowns time out on platforms like Cloud Run, Fly, and k8s.
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/gateway.js"]

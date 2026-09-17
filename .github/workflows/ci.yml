@@ -28,3 +28,36 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build image
         run: docker build -t lexware-mcp:ci .
+      - name: OAuth-Proxy im Container starten
+        run: |
+          docker run -d --name lexware-mcp-ci -p 18080:8080 \
+            -e SERVER_URL=http://127.0.0.1:8080 \
+            -e MCP_PUBLIC_BASE_URL=http://127.0.0.1:8080 \
+            -e ENTRA_TENANT_ID=11111111-1111-4111-8111-111111111111 \
+            -e ENTRA_CLIENT_ID=22222222-2222-4222-8222-222222222222 \
+            -e ENTRA_CLIENT_SECRET=test-client-secret-value \
+            -e ENTRA_SCOPE=mcp.access \
+            -e ENTRA_ACCESS_POLICY=tenant \
+            -e OAUTH_STORAGE_BACKEND=memory \
+            -e OAUTH_JWT_SIGNING_KEY=test-signing-key-12345678901234567890 \
+            -e LEXWARE_READ_ONLY=true \
+            lexware-mcp:ci
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18080/status; then exit 0; fi
+            sleep 1
+          done
+          docker logs lexware-mcp-ci
+          exit 1
+      - name: OAuth-Discovery und DCR prüfen
+        run: |
+          curl --fail --silent http://127.0.0.1:18080/.well-known/oauth-authorization-server \
+            | grep -q '"registration_endpoint":"http://127.0.0.1:8080/register"'
+          curl --fail --silent http://127.0.0.1:18080/.well-known/oauth-protected-resource/mcp \
+            | grep -q '"scopes_supported":\["mcp.access"\]'
+          curl --fail --silent -X POST http://127.0.0.1:18080/register \
+            -H 'content-type: application/json' \
+            --data '{"redirect_uris":["https://claude.ai/api/mcp/auth_callback"],"client_name":"Claude.ai","token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"]}' \
+            | grep -q '"client_id"'
+      - name: Container-Logs bei Fehler
+        if: failure()
+        run: docker logs lexware-mcp-ci || true

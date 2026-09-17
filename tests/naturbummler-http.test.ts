@@ -41,6 +41,20 @@ beforeAll(async () => {
   // Nur Lexware wird simuliert. HTTP, MCP, Signatur- und Berechtigungsprüfung laufen echt.
   vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = String(input);
+    if (url === 'http://127.0.0.1:8091/__internal/verify') {
+      const submitted = JSON.parse(String(init?.body ?? '{}')) as { token?: string };
+      return Response.json({
+        active: true,
+        client_id: 'claude-dcr-client',
+        scopes: ['mcp.access'],
+        expires_at: Math.floor(Date.now() / 1000) + 300,
+        subject: 'benutzer',
+        entra: {
+          tid: tenant, ver: '2.0', oid: 'benutzer', azp: 'entra-client',
+          roles: submitted.token === approved ? ['Lexware.Read'] : [], groups: [],
+        },
+      });
+    }
     if (url.startsWith('https://api.lexware.io/')) {
       upstreamCalls++;
       expect(init?.method).toBe('GET');
@@ -65,8 +79,8 @@ it('liefert Health, Logo und Entra-Discovery; sperrt unautorisierte Anfragen', a
   expect((await realFetch(`${base}/status`)).status).toBe(200);
   expect((await realFetch(`${base}/assets/naturbummler-logo.webp`)).headers.get('content-type')).toContain('image/webp');
   const discovery = await (await realFetch(`${base}/.well-known/oauth-protected-resource/mcp`)).json();
-  expect(discovery.authorization_servers).toContain(`https://login.microsoftonline.com/${tenant}/v2.0`);
-  expect(discovery.scopes_supported).toEqual([`api://${audience}/mcp.access`]);
+  expect(discovery.authorization_servers).toContain('https://lexware.example.com/');
+  expect(discovery.scopes_supported).toEqual(['mcp.access']);
   const unauthorized = await realFetch(`${base}/mcp`, { method: 'POST' });
   expect(unauthorized.status).toBe(401);
   expect(unauthorized.headers.get('www-authenticate')).toContain('resource_metadata=');

@@ -10,7 +10,7 @@
     "dev:tunnel": "skybridge dev --tunnel",
     "build": "tsc -b --force && tsc -p tsconfig.railway.json",
     "build:views": "skybridge build",
-    "start": "node dist/server.js",
+    "start": "node dist/gateway.js",
     "typecheck": "tsc -b --force && tsc -p tsconfig.railway.json",
     "test": "vitest run",
     "test:watch": "vitest"

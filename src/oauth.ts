@@ -30,6 +30,8 @@ export interface OAuthSettings {
    * `${issuer}/oauth2/register`; `undefined` omits the field (see AuthConfig).
    */
   registrationEndpoint?: string;
+  /** Interner, ausschließlich per Loopback erreichbarer FastMCP-Tokenprüfer. */
+  proxyVerifyUrl?: string;
 }
 
 /** True when `email`'s domain is in `allowed` (case-insensitive). Pure; unit-tested. */
@@ -73,7 +75,9 @@ export function buildOAuthMetadata(oauth: OAuthSettings): OAuthMetadata {
     // other: an operator who sets OAUTH_SCOPES_SUPPORTED for a non-WorkOS IdP would
     // otherwise still see `openid email profile` advertised here. Falls back to the
     // historic default when unset, leaving existing deployments unchanged.
-    scopes_supported: oauth.entra
+    scopes_supported: oauth.proxyVerifyUrl
+      ? advertisedScopes(oauth) ?? []
+      : oauth.entra
       ? [...(advertisedScopes(oauth) ?? []), "openid", "profile", "offline_access"]
       : advertisedScopes(oauth) ?? DEFAULT_ADVERTISED_SCOPES,
   };
@@ -154,6 +158,64 @@ export function createAccessTokenVerifier(oauth: OAuthSettings, deps: VerifierDe
   // Caches only successful userinfo lookups (token -> email) to avoid re-hitting
   // userinfo on every request. Misses are never cached (see below).
   const emailCache = new Map<string, { email: string; exp: number }>();
+
+  if (oauth.proxyVerifyUrl) {
+    return async function verifyProxyAccessToken(token: string): Promise<AuthInfo> {
+      let response: Response;
+      try {
+        response = await fetchFn(oauth.proxyVerifyUrl!, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token }),
+          signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
+        });
+      } catch {
+        throw new InvalidTokenError("OAuth-Tokenprüfung ist nicht erreichbar");
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new InvalidTokenError("Invalid or expired access token");
+      }
+      let result: Record<string, unknown>;
+      try {
+        result = await response.json() as Record<string, unknown>;
+      } catch {
+        throw new InvalidTokenError("Ungültige Antwort der OAuth-Tokenprüfung");
+      }
+      const clientId = typeof result.client_id === "string" ? result.client_id : "";
+      const scopes = Array.isArray(result.scopes)
+        ? result.scopes.filter((scope): scope is string => typeof scope === "string")
+        : [];
+      if (!result.active || !clientId) throw new InvalidTokenError("Invalid or expired access token");
+      if (oauth.entra && !oauth.entra.requiredScopes.every(scope => scopes.includes(scope))) {
+        throw new InsufficientScopeError("Erforderlicher Entra-Scope fehlt");
+      }
+      if (oauth.entra) {
+        const claims = result.entra && typeof result.entra === "object"
+          ? result.entra as Record<string, unknown>
+          : {};
+        if (claims.tid !== oauth.entra.tenantId || claims.ver !== "2.0" ||
+            typeof claims.oid !== "string" || !claims.oid ||
+            typeof claims.azp !== "string" || !claims.azp || claims.idtyp === "app") {
+          throw new InvalidTokenError("Kein gültiges delegiertes Entra-Access-Token");
+        }
+        const roles = Array.isArray(claims.roles) ? claims.roles : [];
+        const groups = Array.isArray(claims.groups) ? claims.groups : [];
+        if (oauth.entra.accessPolicy === "assigned" &&
+            !oauth.entra.allowedRoles.some(role => roles.includes(role)) &&
+            !oauth.entra.allowedGroups.some(group => groups.includes(group))) {
+          throw new InsufficientScopeError("Keine freigegebene Gruppe oder App-Rolle");
+        }
+      }
+      return {
+        token,
+        clientId,
+        scopes,
+        expiresAt: typeof result.expires_at === "number" ? result.expires_at : undefined,
+        extra: typeof result.subject === "string" ? { sub: result.subject } : undefined,
+      };
+    };
+  }
 
   // Accept the audience with or without a trailing slash: the advertised
   // Resource Indicator (`new URL(resource)`) serializes a bare origin with a

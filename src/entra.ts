@@ -12,13 +12,13 @@ export interface EntraPolicy {
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const list = (value?: string) => (value ?? '').split(/[,\s]+/).filter(Boolean);
 
-/** Die bestehende MCP-API ist die Audience; die Railway-Adresse ist nur die Ressource. */
+/** Bereitet denselben lokalen Entra-OAuth-Proxy vor, den auch Cargoboard verwendet. */
 export function entraEnvironment(env: NodeJS.ProcessEnv): { env: NodeJS.ProcessEnv; policy?: EntraPolicy } {
   if (!env.ENTRA_TENANT_ID && env.NATURBUMMLER_PROFILE !== 'true') return { env };
   const tenantId = env.ENTRA_TENANT_ID?.trim() ?? '';
-  const audience = env.ENTRA_API_AUDIENCE?.trim() ?? '';
+  const audience = env.ENTRA_CLIENT_ID?.trim() || env.ENTRA_API_AUDIENCE?.trim() || '';
   if (!uuid.test(tenantId) || !uuid.test(audience)) {
-    throw new ConfigError('ENTRA_TENANT_ID und ENTRA_API_AUDIENCE müssen gültige UUIDs sein.');
+    throw new ConfigError('ENTRA_TENANT_ID und ENTRA_CLIENT_ID müssen gültige UUIDs sein.');
   }
   const requiredScopes = list(env.ENTRA_SCOPE ?? 'mcp.access');
   if (!requiredScopes.length || requiredScopes.some(s => !/^[A-Za-z0-9._-]+$/.test(s))) {
@@ -40,8 +40,10 @@ export function entraEnvironment(env: NodeJS.ProcessEnv): { env: NodeJS.ProcessE
   const origin = env.SERVER_URL?.trim() || (env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : '');
   let url: URL;
   try { url = new URL(origin); } catch { throw new ConfigError('SERVER_URL fehlt oder ist ungültig.'); }
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-    throw new ConfigError('SERVER_URL muss eine reine HTTPS-Origin sein.');
+  const loopback = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname);
+  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) ||
+      url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+    throw new ConfigError('SERVER_URL muss eine reine HTTPS-Origin sein (HTTP nur auf Loopback).');
   }
   if (env.OAUTH_VERIFY_AUDIENCE === 'false' || env.MCP_ALLOW_UNAUTHENTICATED === 'true' || env.MCP_AUTH_TOKEN) {
     throw new ConfigError('Das Naturbummler-Profil erlaubt ausschließlich geprüfte Entra-Token.');
@@ -50,20 +52,25 @@ export function entraEnvironment(env: NodeJS.ProcessEnv): { env: NodeJS.ProcessE
     throw new ConfigError('Der Naturbummler-Pilot erlaubt ausschließlich Lesezugriffe.');
   }
   const base = `https://login.microsoftonline.com/${tenantId}`;
+  const proxyVerifyUrl = env.OAUTH_PROXY_VERIFY_URL?.trim() ||
+    `http://127.0.0.1:${env.AUTH_INTERNAL_PORT?.trim() || '8091'}/__internal/verify`;
   return {
     policy: { accessPolicy, tenantId, audience, requiredScopes, allowedGroups, allowedRoles },
     env: {
       ...env,
       SERVER_URL: url.origin,
       OAUTH_RESOURCE: `${url.origin}/mcp`,
-      OAUTH_ISSUER: `${base}/v2.0`,
+      // Der öffentliche Authorization Server ist der lokale FastMCP-Proxy. Er nutzt
+      // serverseitig die bestehende Entra-App und gibt Entra-Tokens nie an Claude aus.
+      OAUTH_ISSUER: `${url.origin}/`,
       OAUTH_JWKS_URL: `${base}/discovery/v2.0/keys`,
-      OAUTH_AUTHORIZATION_ENDPOINT: `${base}/oauth2/v2.0/authorize`,
-      OAUTH_TOKEN_ENDPOINT: `${base}/oauth2/v2.0/token`,
-      OAUTH_REGISTRATION_ENDPOINT: 'none',
+      OAUTH_AUTHORIZATION_ENDPOINT: `${url.origin}/authorize`,
+      OAUTH_TOKEN_ENDPOINT: `${url.origin}/token`,
+      OAUTH_REGISTRATION_ENDPOINT: `${url.origin}/register`,
+      OAUTH_PROXY_VERIFY_URL: proxyVerifyUrl,
       OAUTH_VERIFY_AUDIENCE: 'true',
-      OAUTH_AUDIENCE: audience,
-      OAUTH_SCOPES_SUPPORTED: requiredScopes.map(s => `${identifier.replace(/\/$/, '')}/${s}`).join(' '),
+      OAUTH_AUDIENCE: `${url.origin}/mcp`,
+      OAUTH_SCOPES_SUPPORTED: requiredScopes.join(' '),
       OAUTH_ALLOWED_EMAIL_DOMAINS: '',
       LEXWARE_API_BASE_URL: 'https://api.lexware.io',
       LEXWARE_READ_ONLY: 'true',
