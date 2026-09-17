@@ -1,8 +1,10 @@
-# Naturbummler: Vorbereitung und Deployment-Konfiguration
+# Naturbummler: Deployment und OAuth-Konfiguration
 
 ## Status
 
-**Noch nicht deployt.** Der leere Dienst und die Domain sind angelegt; Variablenreferenzen, Docker-Build, Start und Healthcheck sind hinterlegt. Die Code-Quelle fehlt absichtlich noch. Dieser Stand ist eine getestete Vorbereitung, keine Live-Abnahme.
+**In Railway deployt.** Der Dienst läuft in `production` in EU West. Die Umstellung auf
+den Cargoboard-kompatiblen OAuth-Proxy ist implementiert; Live-Abnahme folgt nach Deployment
+dieser Änderung, zusätzlicher Entra-Redirect-URI und Hinterlegung des Lexware-Schlüssels.
 
 - Fork: `NTD-Consulting-Ventures/naturbummler-lexware-mcp`.
 - Ausgangspunkt: `marselsel/Lexware-MCP-Server`, Commit `5c0247053c36aaaac0feaebdbda2dbc7e09f4a59`.
@@ -26,16 +28,16 @@
 | Dienstname | `naturbummler-lexware-mcp` |
 | Quelle | Naturbummler-Fork, freigegebener Commit; kein Upstream-Autodeploy |
 | Build | Dockerfile, Node 26, gesperrter npm-Lockfile, nicht privilegierter Benutzer |
-| Start | `node dist/server.js` |
-| Soll-Konfiguration | `.railway/railway.ts`; benannter Teil nur für Lexware, noch nicht angewendet |
+| Start | `node dist/gateway.js` mit internem FastMCP-Auth- und Skybridge-App-Prozess |
+| Soll-Konfiguration | `.railway/railway.ts`; benannter Teil nur für Lexware |
 | Port | Von Railway gesetztes `PORT`; Standard 8080 |
 | Healthcheck | `GET /status`, Timeout 60 Sekunden |
-| Region | Soll: `europe-west4-drams3a`; aktuell voreingestellt: `sfo`, Wechsel noch offen |
+| Region | `europe-west4-drams3a` (EU West, Amsterdam) |
 | Replikate | 1 |
 | Neustart | Bei Fehler, höchstens 3 Versuche |
-| MCP-Adresse | `https://naturbummler-lexware-mcp-production.up.railway.app/mcp` (noch ohne Deployment) |
+| MCP-Adresse | `https://naturbummler-lexware-mcp-production.up.railway.app/mcp` |
 | Geheimnisse | `LEXWARE_API_KEY` ausschließlich als Railway-Variable |
-| Zusätzlicher Speicher | Für die vorbereitete direkte Entra-Verifikation nicht erforderlich |
+| Zusätzlicher Speicher | Bestehendes Railway-Redis, eigener verschlüsselter Namespace |
 
 Der Container aktiviert `NATURBUMMLER_PROFILE=true`. Ohne vollständige Entra-
 Konfiguration startet er nicht. Bei der optionalen Politik `assigned` ist zusätzlich eine Freigabeliste erforderlich. Schreibfreigaben und statische
@@ -50,10 +52,15 @@ Die Vorlage `.env.naturbummler.example` enthält keine echten Zugangsdaten.
 | `NATURBUMMLER_PROFILE` | `true` |
 | `SERVER_URL` | Öffentliche HTTPS-Origin des neuen Diensts, ohne `/mcp` |
 | `ENTRA_TENANT_ID` | Railway-Referenz `${{cargo-mcp.ENTRA_TENANT_ID}}` |
+| `ENTRA_CLIENT_ID` | Railway-Referenz `${{cargo-mcp.ENTRA_CLIENT_ID}}` |
+| `ENTRA_CLIENT_SECRET` | Railway-Referenz `${{cargo-mcp.ENTRA_CLIENT_SECRET}}` |
 | `ENTRA_API_AUDIENCE` | Railway-Referenz `${{cargo-mcp.ENTRA_CLIENT_ID}}`; vor Live-Abnahme als API-Audience bestätigen |
 | `ENTRA_IDENTIFIER_URI` | Optional; vorhandene API-Identifier-URI, sonst `api://<Audience>` |
 | `ENTRA_SCOPE` | Railway-Referenz `${{cargo-mcp.ENTRA_SCOPE}}`; Discovery bestätigt `mcp.access` |
 | `ENTRA_ACCESS_POLICY` | `tenant`, ausdrücklich wie Cargoboard ohne zusätzliche Gruppen-/Rollenfilter; optional `assigned` für engere Freigaben |
+| `OAUTH_JWT_SIGNING_KEY` | Railway-Referenz auf den bestehenden Cargoboard-Wert; Token bleiben pro Dienst audience-gebunden |
+| `OAUTH_STORAGE_ENCRYPTION_KEY` | Railway-Referenz auf den bestehenden Cargoboard-Wert |
+| `REDIS_URL` | Railway-Referenz auf Cargoboards vorhandene Redis-Verbindung |
 | `ENTRA_ALLOWED_ROLES` | Exakte, bereits freigegebene App-Rollenwerte, getrennt durch Komma/Leerzeichen |
 | `ENTRA_ALLOWED_GROUP_IDS` | Alternativ/zusätzlich ausdrücklich freigegebene Gruppen-Objekt-IDs |
 | `LEXWARE_API_KEY` | Vorhandener Lexware-Schlüssel oder separat bereitgestelltes Railway-Secret |
@@ -70,46 +77,25 @@ App-Rolle ist für große Gruppenbestände oft einfacher.
 
 ## Microsoft-Anmeldung und Claude.ai
 
-### Gleiche Identität, exakt geprüfte Audience
+### Gleiche Anmeldung wie Cargoboard
 
-Die Vorbereitung verwendet direkte Entra-Access-Token für die bestehende MCP-API.
-Verifiziert werden RS256-Signatur, exakter mandantenspezifischer v2-Issuer, `tid`,
-API-`aud`, `exp`, `iat`, `sub`, `oid`, `azp`, `ver`, delegierter `scp`; bei `assigned` zusätzlich Rolle/Gruppe.
-Graph-Token, ID-Token ohne delegierten Scope und reine App-Token werden abgewiesen.
-Die API-Audience darf nicht durch die Railway-URL ersetzt werden.
-
-Cargoboard verwendet lokal einen FastMCP-OAuth-Proxy. Dessen dienstspezifische
-MCP-Token sind keine Entra-Access-Token und werden hier nicht übernommen.
-Dasselbe Microsoft-Konto und dieselbe geschützte MCP-API können genutzt werden;
-ein beliebiger vorhandener MCP-Bearer ist dadurch nicht automatisch gültig.
+Lexware verwendet nun denselben FastMCP-`AzureProvider`-Ablauf wie Cargoboard. Claude
+registriert sich dynamisch beim MCP. Der Proxy meldet sich mit der bestehenden Entra-App
+an, validiert den mandantenspezifischen v2-Issuer, die API-Audience und `mcp.access`,
+speichert Upstream-Tokens verschlüsselt in Redis und stellt ein eigenes, an die Lexware-
+MCP-URL gebundenes Token aus. Entra-Tokens und Client-Secret werden nie an Claude gegeben.
 
 ### Noch vor der Live-Abnahme zu prüfen
 
-1. Vorhandene Entra-App und Unternehmensanwendung lesen: Tenant, Identifier-URI,
-   delegierter Scope, `requestedAccessTokenVersion=2`, Benutzerzuweisungen und Rollen/Gruppen.
-2. Vorhandenen geeigneten OAuth-Client für Claude.ai identifizieren. Entra unterstützt
-   in diesem Ablauf keine dynamische Client-Registrierung; deshalb wird kein fiktiver
-   DCR-Endpunkt annonciert.
-3. Bei direkter Entra-Anmeldung muss der OAuth-Client die Web-Redirect-URI
-   `https://claude.ai/api/mcp/auth_callback` besitzen und die bestehende MCP-API
-   delegiert anfordern dürfen. Cargoboards Server-Callback `/auth/callback` ersetzt
-   diesen direkten Claude-Callback nicht.
-4. In Claude.ai die registrierte OAuth-Client-ID in den erweiterten Einstellungen
-   verwenden, mit Client-Secret falls die bestehende Registrierung dies benötigt.
-   **Nicht ungeprüft das Cargoboard-Client-Secret weitergeben.** Ein hierfür noch
-   nötiger Registrierungs- oder Credential-Wechsel muss in die endgültige
-   Deployment-Konfiguration aufgenommen werden.
-5. Die tatsächlichen Authorization-Requests auf PKCE, vollständigen API-Scope,
-   `offline_access` und den Resource-Parameter prüfen. Falls Entra den Resource-
-   Parameter auswertet, muss die MCP-URL zur bestehenden API-App gehören.
-   Eine dafür nötige zusätzliche Identifier-URI oder ein OAuth-Proxy ist erst nach
-   Live-Prüfung festzulegen. Die Audience-Prüfung bleibt dabei zwingend aktiv.
-6. Bestehende Entra-Zuweisungen wie bei Cargoboard beibehalten. Keine zusätzliche
+1. In der bestehenden Entra-App als weitere Web-Redirect-URI eintragen:
+   `https://naturbummler-lexware-mcp-production.up.railway.app/auth/callback`.
+2. Bestehende Entra-Zuweisungen wie bei Cargoboard beibehalten. Keine zusätzliche
    Gruppen-/Rollenfreigabe für den gewünschten Pilot erforderlich; `Lexware.Read`
    dient in Tests ausschließlich der optionalen Politik `assigned`.
+3. In Claude.ai `Sign in now` und `Register automatically` wählen. Keine Client-ID
+   und kein Client-Secret in Claude eintragen.
 
-Die direkte Variante ist lokal geprüft. Ihre Kompatibilität mit der konkreten
-Claude.ai-/Entra-Registrierung ist bis zum echten Login **offen**.
+Der echte Claude.ai-/Entra-Login bleibt bis zur Live-Abnahme offen.
 
 ## Prüfungen
 
@@ -122,7 +108,7 @@ npm test
 npm audit
 ```
 
-Ergebnis: **374 Tests in 21 Dateien erfolgreich**, TypeScript-Build erfolgreich,
+Ergebnis: **381 Tests in 21 Dateien erfolgreich**, TypeScript-Build erfolgreich,
 **0 bekannte npm-Audit-Schwachstellen** nach kompatiblen Lockfile-Aktualisierungen.
 
 Der neue HTTP-Integrationstest startet die wirkliche Server-Anwendung, prüft

@@ -1,4 +1,4 @@
-# Railway-Vorbereitung
+# Railway-Konfiguration
 
 Die Datei `railway.ts` beschreibt den Sollzustand des Lexware-Diensts im bestehenden
 Projekt `naturbummler-cargo-mcp`, Umgebung `production`.
@@ -7,19 +7,17 @@ Sie ist ein benannter Teil (`partial`), weil Cargoboard und Google Ads in eigene
 Repositories verwaltet werden. Diesen Namen nicht ändern. Der Plan darf keine
 Löschungen oder Änderungen an Cargoboard, Google Ads oder Redis enthalten.
 
-Die Datei ist typgeprüft, aber noch nicht mit einer angemeldeten Railway-CLI geplant
-oder angewendet. Kein automatischer Apply-Workflow ist eingerichtet.
+Die Live-Konfiguration wurde über Railway angewendet. Die Datei bleibt der typgeprüfte,
+auf diesen Dienst begrenzte Sollzustand.
 
-Vor der Freigabe:
+Für die OAuth-Proxy-Umstellung:
 
-1. `LEXWARE_API_KEY` direkt im bestehenden leeren Lexware-Dienst hinterlegen.
-2. Entra-/Claude-Client-Konfiguration abschließen.
-3. Railway CLI >= 5.42.1 anmelden und mit dem bestehenden Projekt/production verbinden.
-4. `railway config plan` ausführen und den vollständigen Plan prüfen.
-5. Nutzerfreigabe einholen. `railway config apply` kann durch die Quellenverknüpfung
-   ein Deployment auslösen und darf deshalb nicht vorher ausgeführt werden.
+1. Bestehende Cargoboard-Entra- und Redis-Secrets ausschließlich per Railway-Referenz übernehmen.
+2. In der bestehenden Entra-App die Web-Redirect-URI
+   `https://naturbummler-lexware-mcp-production.up.railway.app/auth/callback` ergänzen.
+3. `LEXWARE_API_KEY` direkt im Lexware-Dienst hinterlegen.
+4. Nach dem Deployment Discovery, DCR, Microsoft-Anmeldung und eine Leseabfrage prüfen.
 
 Der Schlüssel wird durch `preserve()` auf Railway gehalten. Keine echten Secret-
 Werte in die Datei schreiben. Die öffentliche Domain ist bereits angelegt und wird
-nicht durch IaC verwaltet. Der Regionswechsel von SFO nach Europe West und die
-GitHub-Quellenverknüpfung sind noch nicht angewendet.
+nicht durch IaC verwaltet. Region und GitHub-Quelle sind bereits live.

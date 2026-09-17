@@ -90,6 +90,8 @@ export type AuthConfig =
        * registration and fail instead of falling back to a pre-registered client.
        */
       registrationEndpoint: string | undefined;
+      /** Loopback-Endpunkt des Cargoboard-kompatiblen FastMCP-OAuth-Proxys. */
+      proxyVerifyUrl?: string;
     }
   | { mode: "static"; token: string }
   | { mode: "none" };
@@ -326,6 +328,16 @@ function resolveAuth(env: NodeJS.ProcessEnv): AuthConfig {
             `${issuerBase}/oauth2/register`,
             "OAUTH_REGISTRATION_ENDPOINT",
           );
+    const proxyVerifyRaw = env.OAUTH_PROXY_VERIFY_URL?.trim();
+    const proxyVerifyUrl = proxyVerifyRaw
+      ? normalizeUrl(proxyVerifyRaw, proxyVerifyRaw, "OAUTH_PROXY_VERIFY_URL")
+      : undefined;
+    if (proxyVerifyUrl) {
+      const host = new URL(proxyVerifyUrl).hostname;
+      if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(host)) {
+        throw new ConfigError('OAUTH_PROXY_VERIFY_URL darf ausschließlich auf Loopback zeigen.');
+      }
+    }
     return {
       mode: "oauth",
       issuer,
@@ -339,6 +351,7 @@ function resolveAuth(env: NodeJS.ProcessEnv): AuthConfig {
       authorizationEndpoint,
       tokenEndpoint,
       registrationEndpoint,
+      proxyVerifyUrl,
     };
   }
 

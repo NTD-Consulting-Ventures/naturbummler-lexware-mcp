@@ -15,6 +15,16 @@ const env = {
 const config = loadConfig(env);
 if (config.auth.mode !== 'oauth') throw new Error('OAuth erwartet');
 const oauth = config.auth;
+const directOAuth = {
+  ...oauth,
+  proxyVerifyUrl: undefined,
+  issuer: `https://login.microsoftonline.com/${tenant}/v2.0`,
+  jwksUrl: `https://login.microsoftonline.com/${tenant}/discovery/v2.0/keys`,
+  authorizationEndpoint: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`,
+  tokenEndpoint: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+  registrationEndpoint: undefined,
+  scopesSupported: [`api://${audience}/mcp.access`],
+};
 let sign: (claims?: jose.JWTPayload, options?: { aud?: string; iss?: string; noExpiry?: boolean }) => Promise<string>;
 let jwks: ReturnType<typeof jose.createLocalJWKSet>;
 beforeAll(async () => {
@@ -26,7 +36,7 @@ beforeAll(async () => {
     let jwt = new jose.SignJWT({ sub: 'test-benutzer', oid: 'test-objekt', azp: 'test-client',
       tid: tenant, ver: '2.0', scp: 'mcp.access', roles: ['Lexware.Read'], ...claims })
       .setProtectedHeader({ alg: 'RS256', kid: 'test' })
-      .setIssuer(options.iss ?? oauth.issuer).setAudience(options.aud ?? audience).setIssuedAt();
+      .setIssuer(options.iss ?? directOAuth.issuer).setAudience(options.aud ?? audience).setIssuedAt();
     if (!options.noExpiry) jwt = jwt.setExpirationTime(claims.exp ?? '5m');
     return jwt.sign(privateKey);
   };
@@ -36,12 +46,13 @@ describe('Naturbummler-Konfiguration', () => {
   it('startet mit vollständigem Entra-Schutz auch vor der späteren Secret-Eingabe', () => {
     expect(loadConfig({ ...env, LEXWARE_API_KEY: '' }).lexwareApiKey).toBe('');
   });
-  it('erzwingt Lesen und annonciert den vollqualifizierten API-Scope ohne falsches DCR', () => {
+  it('erzwingt Lesen und annonciert den Cargoboard-kompatiblen OAuth-Proxy mit DCR', () => {
     expect(config.capabilities).toEqual({ read: true, drafts: false, finalize: false, urlUpload: false });
-    expect(oauth.scopesSupported).toEqual([`api://${audience}/mcp.access`]);
-    expect(buildOAuthMetadata(oauth)).not.toHaveProperty('registration_endpoint');
-    expect(buildOAuthMetadata(oauth).scopes_supported).toContain('offline_access');
-    expect(oauth.issuer).toBe(`https://login.microsoftonline.com/${tenant}/v2.0`);
+    expect(oauth.scopesSupported).toEqual(['mcp.access']);
+    expect(buildOAuthMetadata(oauth).registration_endpoint).toBe('https://lexware.example.com/register');
+    expect(buildOAuthMetadata(oauth).scopes_supported).toEqual(['mcp.access']);
+    expect(oauth.issuer).toBe('https://lexware.example.com/');
+    expect(oauth.proxyVerifyUrl).toBe('http://127.0.0.1:8091/__internal/verify');
   });
   it.each([
     { ENTRA_TENANT_ID: 'common' }, { ENTRA_API_AUDIENCE: '' },
@@ -58,21 +69,21 @@ describe('Naturbummler-Konfiguration', () => {
 
 describe('Entra-Access-Token', () => {
   it('akzeptiert den delegierten Scope und die freigegebene Rolle', async () => {
-    const info = await createAccessTokenVerifier(oauth, { jwks })(await sign());
+    const info = await createAccessTokenVerifier(directOAuth, { jwks })(await sign());
     expect(info.scopes).toEqual(['mcp.access']);
   });
   it('verlangt bei der ausdrücklich gewählten Mandantenfreigabe keine zusätzliche Rolle', async () => {
     const tenantConfig = loadConfig({ ...env, ENTRA_ACCESS_POLICY: 'tenant', ENTRA_ALLOWED_ROLES: '' });
     if (tenantConfig.auth.mode !== 'oauth') throw new Error('OAuth erwartet');
-    const verify = createAccessTokenVerifier(tenantConfig.auth, { jwks });
+    const verify = createAccessTokenVerifier({ ...tenantConfig.auth, ...directOAuth, entra: tenantConfig.auth.entra }, { jwks });
     await expect(verify(await sign({ roles: [] }))).resolves.toHaveProperty('expiresAt');
     await expect(verify(await sign({ roles: [], scp: 'openid' }))).rejects.toThrow();
     await expect(verify(await sign({ roles: [], tid: 'fremder-mandant' }))).rejects.toThrow();
     await expect(verify(await sign({ roles: [] }, { aud: '00000003-0000-0000-c000-000000000000' }))).rejects.toThrow();
   });
   it('akzeptiert alternativ eine explizit freigegebene Gruppe', async () => {
-    const policy = { ...oauth.entra!, allowedGroups: [group] };
-    await expect(createAccessTokenVerifier({ ...oauth, entra: policy }, { jwks })(
+    const policy = { ...directOAuth.entra!, allowedGroups: [group] };
+    await expect(createAccessTokenVerifier({ ...directOAuth, entra: policy }, { jwks })(
       await sign({ roles: [], groups: [group] }),
     )).resolves.toHaveProperty('expiresAt');
   });
@@ -85,15 +96,15 @@ describe('Entra-Access-Token', () => {
     { roles: [], hasgroups: true, _claim_names: { groups: 'src1' } },
     { idtyp: 'app' }, { exp: 1 },
   ])('verweigert ungültige oder unberechtigte Claims: %j', async claims => {
-    await expect(createAccessTokenVerifier(oauth, { jwks })(await sign(claims))).rejects.toThrow();
+    await expect(createAccessTokenVerifier(directOAuth, { jwks })(await sign(claims))).rejects.toThrow();
   });
   it.each(['00000003-0000-0000-c000-000000000000', 'https://lexware.example.com/mcp', `api://${audience}`])(
     'lehnt fremde Audience %s ab', async aud => {
-      await expect(createAccessTokenVerifier(oauth, { jwks })(await sign({}, { aud }))).rejects.toThrow();
+      await expect(createAccessTokenVerifier(directOAuth, { jwks })(await sign({}, { aud }))).rejects.toThrow();
     },
   );
   it('verweigert falschen Issuer und fehlenden Ablauf', async () => {
-    const verify = createAccessTokenVerifier(oauth, { jwks });
+    const verify = createAccessTokenVerifier(directOAuth, { jwks });
     await expect(verify(await sign({}, { iss: 'https://example.com' }))).rejects.toThrow();
     await expect(verify(await sign({}, { noExpiry: true }))).rejects.toThrow();
   });
@@ -101,7 +112,35 @@ describe('Entra-Access-Token', () => {
     const token = await sign();
     const parts = token.split('.');
     parts[2] = 'AAAA' + parts[2].slice(4);
-    await expect(createAccessTokenVerifier(oauth, { jwks })(parts.join('.'))).rejects.toThrow();
+    await expect(createAccessTokenVerifier(directOAuth, { jwks })(parts.join('.'))).rejects.toThrow();
+  });
+});
+
+describe('Cargoboard-kompatibler OAuth-Proxy', () => {
+  const validResponse = {
+    active: true,
+    client_id: 'claude-dcr-client',
+    scopes: ['mcp.access'],
+    expires_at: Math.floor(Date.now() / 1000) + 300,
+    subject: 'benutzer',
+    entra: { tid: tenant, ver: '2.0', oid: 'objekt', azp: 'entra-client', roles: ['Lexware.Read'], groups: [] },
+  };
+
+  it('übernimmt nur ein vom lokalen Proxy und Entra bestätigtes Token', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(Response.json(validResponse));
+    const info = await createAccessTokenVerifier(oauth, { fetchFn })('proxy-token');
+    expect(info).toMatchObject({ clientId: 'claude-dcr-client', scopes: ['mcp.access'] });
+    expect(fetchFn).toHaveBeenCalledWith(oauth.proxyVerifyUrl, expect.objectContaining({ method: 'POST' }));
+  });
+
+  it.each([
+    { active: false },
+    { ...validResponse, scopes: [] },
+    { ...validResponse, entra: { ...validResponse.entra, tid: 'fremder-mandant' } },
+    { ...validResponse, entra: { ...validResponse.entra, idtyp: 'app' } },
+  ])('verweigert eine ungültige Proxy-Antwort: %j', async response => {
+    const fetchFn = vi.fn().mockResolvedValue(Response.json(response));
+    await expect(createAccessTokenVerifier(oauth, { fetchFn })('proxy-token')).rejects.toThrow();
   });
 });
 
